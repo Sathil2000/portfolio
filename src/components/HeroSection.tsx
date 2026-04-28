@@ -109,7 +109,7 @@ export default function HeroSection() {
               View Projects
             </a>
             <a
-              href="#contact"
+              href="/contact"
               className="px-8 py-3.5 rounded-xl bg-card border border-border font-display text-sm font-semibold tracking-wide text-foreground/70 hover:text-foreground hover:border-primary/30 transition-all duration-300 shadow-sm"
             >
               Get in Touch
