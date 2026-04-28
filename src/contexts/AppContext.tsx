@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
+import { supabase } from '@/lib/supabase';
 
 // ===== Types =====
 export type BlockType = 'heading' | 'paragraph' | 'image' | 'quote' | 'chart' | 'gallery' | 'divider';
@@ -130,7 +131,8 @@ type Action =
   | { type: 'MARK_MESSAGE_READ'; payload: string }
   | { type: 'CLEAR_MESSAGES' }
   | { type: 'TOGGLE_LANDING_MOCK' }
-  | { type: 'TOGGLE_ADMIN_MOCK' };
+  | { type: 'TOGGLE_ADMIN_MOCK' }
+  | { type: 'HYDRATE'; payload: Partial<AppState> };
 
 const defaultProjects: Project[] = [
   {
@@ -174,56 +176,46 @@ const defaultProjects: Project[] = [
   },
   {
     id: '3',
-    title: 'Quiet Metrics',
-    description: 'Privacy-first product analytics — no cookies, no fingerprinting, just clean signal.',
-    tech: ['Rust', 'PostgreSQL', 'React'],
-    year: '2024',
-    category: 'SaaS',
+    title: 'Meridian OS',
+    description: 'A minimal operating system interface concept for next-gen spatial computing devices.',
+    tech: ['React', 'WebGPU', 'Rust'],
+    year: '2025',
+    category: 'Systems',
     template: 'data',
     featured: true,
     bentoSize: 'md',
-    image: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1200',
-    blocks: [
-      { id: 'b1', type: 'paragraph', content: 'Built for teams that care about user trust. GDPR-native from day one.' },
-      { id: 'b2', type: 'image', content: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1600', caption: 'The dashboard interface.' },
-    ],
+    image: 'https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?w=1200',
   },
   {
     id: '4',
-    title: 'Mossfield',
-    description: 'A meditation app with adaptive ambient soundscapes generated from local weather and time of day.',
-    tech: ['Swift', 'Web Audio', 'CoreML'],
-    year: '2023',
-    category: 'Mobile',
+    title: 'Cipher Protocol',
+    description: 'An end-to-end encrypted messaging layer built on decentralized identity standards.',
+    tech: ['Go', 'libp2p', 'WebAssembly'],
+    year: '2024',
+    category: 'Security',
     template: 'longform',
     featured: true,
     bentoSize: 'sm',
-    image: 'https://images.unsplash.com/photo-1518837695005-2083093ee35b?w=1200',
-    blocks: [
-      { id: 'b1', type: 'paragraph', content: 'Mossfield listens to the world around you and composes a unique soundscape every session.' },
-    ],
+    image: 'https://images.unsplash.com/photo-1558494949-ef010cbdcc31?w=1200',
   },
   {
     id: '5',
-    title: 'Northwind CMS',
-    description: 'A headless CMS built for editorial teams. Block-based, collaborative, and fast.',
-    tech: ['Next.js', 'tRPC', 'Prisma'],
+    title: 'Pulse Analytics',
+    description: 'Real-time SaaS analytics platform processing 2M+ events/day with sub-second query response.',
+    tech: ['ClickHouse', 'Kafka', 'Next.js'],
     year: '2023',
-    category: 'Tooling',
-    template: 'longform',
+    category: 'SaaS',
+    template: 'data',
     featured: false,
-    bentoSize: 'sm',
-    image: 'https://images.unsplash.com/photo-1499951360447-b19be8fe80f5?w=1200',
-    blocks: [
-      { id: 'b1', type: 'paragraph', content: 'Built to power online magazines with deeply structured content.' },
-    ],
+    bentoSize: 'lg',
+    image: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1200',
   },
 ];
 
 const defaultSkills: Skill[] = [
   { id: 's1', name: 'React / Next.js', level: 95 },
   { id: 's2', name: 'TypeScript', level: 90 },
-  { id: 's3', name: 'Node.js / Python', level: 85 },
+  { id: 's3', name: 'Node.js / Go', level: 85 },
   { id: 's4', name: 'UI/UX Design', level: 88 },
   { id: 's5', name: 'Cloud & DevOps', level: 78 },
   { id: 's6', name: 'AI / ML', level: 72 },
@@ -326,6 +318,7 @@ function reducer(state: AppState, action: Action): AppState {
     case 'CLEAR_MESSAGES': return { ...state, messages: [] };
     case 'TOGGLE_LANDING_MOCK': return { ...state, landingMockHidden: !state.landingMockHidden };
     case 'TOGGLE_ADMIN_MOCK': return { ...state, adminMockHidden: !state.adminMockHidden };
+    case 'HYDRATE': return { ...state, ...action.payload, isAuthenticated: false, twoFactorPending: false };
     default: return state;
   }
 }
@@ -359,41 +352,78 @@ function applyVisibility(state: AppState): AppState {
   return view;
 }
 
+// Fields we never save to Supabase (session-only or local toggles)
+const SKIP_FIELDS = ['isAuthenticated', 'twoFactorPending', 'analyticsData', 'landingMockHidden', 'adminMockHidden'];
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, undefined, loadState);
+  const [hydrated, setHydrated] = React.useState(false);
+
+  // ── On mount: fetch global state from Supabase ──────────────────────────
+  useEffect(() => {
+    supabase
+      .from('portfolio_config')
+      .select('data')
+      .eq('id', 'main')
+      .single()
+      .then(({ data, error }) => {
+        if (!error && data?.data && Object.keys(data.data).length > 0) {
+          dispatch({ type: 'HYDRATE', payload: data.data as Partial<AppState> });
+        }
+        setHydrated(true);
+      })
+      .catch(() => {
+        // Supabase unreachable — fall back to localStorage silently
+        setHydrated(true);
+      });
+  }, []);
+
+  // ── Save to Supabase whenever admin changes state ───────────────────────
+  useEffect(() => {
+    if (!state.isAuthenticated || !hydrated) return;
+
+    const toSave = Object.fromEntries(
+      Object.entries(state).filter(([key]) => !SKIP_FIELDS.includes(key))
+    );
+
+    supabase
+      .from('portfolio_config')
+      .upsert({ id: 'main', data: toSave, updated_at: new Date().toISOString() })
+      .then(({ error }) => {
+        if (error) console.error('[Supabase] Save failed:', error.message);
+      });
+  }, [state, hydrated]);
+
+  // ── Also keep localStorage as a local backup ───────────────────────────
   useEffect(() => {
     try {
       const { isAuthenticated, twoFactorPending, ...toSave } = state;
-      localStorage.setItem('portfolio-state', JSON.stringify(toSave));
+      const slim = {
+        ...toSave,
+        heroImage: toSave.heroImage?.startsWith('data:') ? undefined : toSave.heroImage,
+        projects: toSave.projects.map(p => ({
+          ...p,
+          image: p.image?.startsWith('data:') ? undefined : p.image,
+          imageBack: p.imageBack?.startsWith('data:') ? undefined : p.imageBack,
+        })),
+      };
+      localStorage.setItem('portfolio-state', JSON.stringify(slim));
     } catch (err) {
-      // Quota exceeded (oversized base64 images) or storage unavailable.
-      // Swallow so the React tree never unmounts mid-save, but surface a warning
-      // so the admin knows their changes won't survive a reload.
-      console.warn('[AppContext] Could not persist state to localStorage:', err);
-      try {
-        // Strip heaviest fields (base64 images) and try again so at least text changes persist.
-        const { isAuthenticated, twoFactorPending, ...rest } = state;
-        const slim = {
-          ...rest,
-          heroImage: rest.heroImage && rest.heroImage.startsWith('data:') ? undefined : rest.heroImage,
-          projects: rest.projects.map(p => ({
-            ...p,
-            image: p.image && p.image.startsWith('data:') ? undefined : p.image,
-            imageBack: p.imageBack && p.imageBack.startsWith('data:') ? undefined : p.imageBack,
-          })),
-        };
-        localStorage.setItem('portfolio-state', JSON.stringify(slim));
-        console.warn('[AppContext] Saved a slim copy without uploaded image data — please use image URLs for very large images.');
-      } catch {
-        // Give up silently.
-      }
+      console.warn('[AppContext] localStorage save failed:', err);
     }
   }, [state]);
+
+  // ── Show nothing until Supabase responds (avoids flash of default content) ──
+  if (!hydrated) return null;
+
   const projected = applyVisibility(state);
-  return <AppContext.Provider value={{ state: projected, rawState: state, dispatch }}>{children}</AppContext.Provider>;
+  return (
+    <AppContext.Provider value={{ state: projected, rawState: state, dispatch }}>
+      {children}
+    </AppContext.Provider>
+  );
 }
 
 export const useApp = () => useContext(AppContext);
 /** Admin-only: read the underlying state ignoring mock-visibility toggles. */
 export const useAppRaw = () => useContext(AppContext).rawState;
-
