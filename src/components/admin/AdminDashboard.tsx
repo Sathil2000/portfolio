@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useApp, useAppRaw } from '@/contexts/AppContext';
+import { supabase } from '@/lib/supabase';
 import { motion } from 'framer-motion';
 import { BarChart3, FolderKanban, User, FileText, Sparkles, LogOut, Inbox, Eye, EyeOff } from 'lucide-react';
 import AnalyticsPanel from './AnalyticsPanel';
@@ -21,13 +22,18 @@ const TABS: { id: Tab; label: string; icon: typeof BarChart3 }[] = [
 ];
 
 export default function AdminDashboard() {
-  const state = useAppRaw(); const { dispatch } = useApp();
+  const state = useAppRaw();
+  const { dispatch } = useApp();
   const [activeTab, setActiveTab] = useState<Tab>('analytics');
 
   const unread = state.messages.filter(m => !m.read).length;
-
   const landingHidden = state.landingMockHidden;
   const adminHidden = state.adminMockHidden;
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    dispatch({ type: 'LOGOUT' });
+  };
 
   return (
     <div className="pt-20 min-h-screen bg-muted/30">
@@ -38,6 +44,7 @@ export default function AdminDashboard() {
             <h1 className="font-display text-xl font-bold text-foreground">Dashboard</h1>
             <p className="font-body text-xs text-muted-foreground mt-1">Manage your portfolio</p>
           </div>
+
           <nav className="p-3 flex flex-col gap-1">
             {TABS.map(tab => {
               const Icon = tab.icon;
@@ -55,7 +62,9 @@ export default function AdminDashboard() {
                   <Icon className="w-4 h-4" />
                   <span className="flex-1 text-left">{tab.label}</span>
                   {tab.id === 'messages' && unread > 0 && (
-                    <span className="text-[10px] font-mono bg-primary text-primary-foreground rounded-full px-2 py-0.5">{unread}</span>
+                    <span className="text-[10px] font-mono bg-primary text-primary-foreground rounded-full px-2 py-0.5">
+                      {unread}
+                    </span>
                   )}
                 </button>
               );
@@ -64,6 +73,7 @@ export default function AdminDashboard() {
 
           <div className="mt-auto p-3 space-y-2 border-t border-border">
             <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/70 px-2">Mock data</p>
+
             <button
               onClick={() => dispatch({ type: 'TOGGLE_LANDING_MOCK' })}
               className="w-full flex items-center gap-3 px-3 py-2 rounded-lg font-body text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
@@ -74,6 +84,7 @@ export default function AdminDashboard() {
                 {landingHidden ? 'OFF' : 'ON'}
               </span>
             </button>
+
             <button
               onClick={() => dispatch({ type: 'TOGGLE_ADMIN_MOCK' })}
               className="w-full flex items-center gap-3 px-3 py-2 rounded-lg font-body text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
@@ -84,8 +95,9 @@ export default function AdminDashboard() {
                 {adminHidden ? 'OFF' : 'ON'}
               </span>
             </button>
+
             <button
-              onClick={() => dispatch({ type: 'LOGOUT' })}
+              onClick={handleLogout}
               className="w-full flex items-center gap-3 px-3 py-2 rounded-lg font-body text-sm text-destructive hover:bg-destructive/5 transition-colors mt-2"
             >
               <LogOut className="w-4 h-4" />
