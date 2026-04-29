@@ -1,5 +1,15 @@
-import { useApp, useAppRaw } from '@/contexts/AppContext';
-import { Mail, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase';
+import { Mail, Trash2, RefreshCw } from 'lucide-react';
+
+interface Message {
+  id: string;
+  name: string;
+  email: string;
+  message: string;
+  created_at: number;
+  read: boolean;
+}
 
 function timeAgo(ts: number) {
   const s = Math.floor((Date.now() - ts) / 1000);
@@ -13,8 +23,51 @@ function timeAgo(ts: number) {
 }
 
 export default function MessagesPanel() {
-  const state = useAppRaw(); const { dispatch } = useApp();
-  const messages = state.messages;
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchMessages = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (!error && data) setMessages(data);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchMessages();
+
+    // Real-time: new messages appear instantly without refresh
+    const channel = supabase
+      .channel('messages-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
+        fetchMessages();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  const markRead = async (id: string) => {
+    await supabase.from('messages').update({ read: true }).eq('id', id);
+    setMessages(prev => prev.map(m => m.id === id ? { ...m, read: true } : m));
+  };
+
+  const deleteMessage = async (id: string) => {
+    if (!confirm('Delete this message?')) return;
+    await supabase.from('messages').delete().eq('id', id);
+    setMessages(prev => prev.filter(m => m.id !== id));
+  };
+
+  const clearAll = async () => {
+    if (!confirm('Delete all messages?')) return;
+    await supabase.from('messages').delete().neq('id', '');
+    setMessages([]);
+  };
+
+  const unread = messages.filter(m => !m.read).length;
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -23,46 +76,71 @@ export default function MessagesPanel() {
           <h3 className="font-display text-lg font-semibold text-foreground">Inbox</h3>
           <p className="font-body text-xs text-muted-foreground mt-1">
             {messages.length} {messages.length === 1 ? 'message' : 'messages'} from the contact form
+            {unread > 0 && <span className="ml-2 text-primary font-medium">· {unread} unread</span>}
           </p>
         </div>
-        {messages.length > 0 && (
+        <div className="flex items-center gap-4">
           <button
-            onClick={() => { if (confirm('Delete all messages?')) dispatch({ type: 'CLEAR_MESSAGES' }); }}
-            className="font-body text-xs text-destructive/70 hover:text-destructive transition-colors"
+            onClick={fetchMessages}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+            title="Refresh"
           >
-            Clear all
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
-        )}
+          {messages.length > 0 && (
+            <button
+              onClick={clearAll}
+              className="font-body text-xs text-destructive/70 hover:text-destructive transition-colors"
+            >
+              Clear all
+            </button>
+          )}
+        </div>
       </div>
 
-      {messages.length === 0 ? (
+      {loading ? (
+        <div className="glass-card p-12 text-center">
+          <RefreshCw className="w-6 h-6 mx-auto text-muted-foreground/40 mb-3 animate-spin" />
+          <p className="font-body text-sm text-muted-foreground">Loading messages…</p>
+        </div>
+      ) : messages.length === 0 ? (
         <div className="glass-card p-12 text-center">
           <Mail className="w-10 h-10 mx-auto text-muted-foreground/40 mb-3" />
           <p className="font-body text-sm text-muted-foreground">No messages yet.</p>
-          <p className="font-body text-xs text-muted-foreground/70 mt-1">When visitors submit the contact form, their messages appear here.</p>
+          <p className="font-body text-xs text-muted-foreground/70 mt-1">
+            When visitors submit the contact form, their messages appear here.
+          </p>
         </div>
       ) : (
         <div className="space-y-3">
           {messages.map(m => (
             <article
               key={m.id}
-              onClick={() => !m.read && dispatch({ type: 'MARK_MESSAGE_READ', payload: m.id })}
+              onClick={() => !m.read && markRead(m.id)}
               className={`glass-card p-5 cursor-pointer transition-all ${m.read ? '' : 'border-l-4 border-l-primary'}`}
             >
               <div className="flex items-start justify-between gap-4 mb-2">
                 <div>
                   <div className="flex items-center gap-2">
                     <h4 className="font-display text-sm font-semibold text-foreground">{m.name}</h4>
-                    {!m.read && <span className="text-[10px] font-mono uppercase bg-primary/10 text-primary px-2 py-0.5 rounded-full">New</span>}
+                    {!m.read && (
+                      <span className="text-[10px] font-mono uppercase bg-primary/10 text-primary px-2 py-0.5 rounded-full">
+                        New
+                      </span>
+                    )}
                   </div>
-                  <a href={`mailto:${m.email}`} className="font-body text-xs text-muted-foreground hover:text-primary transition-colors">
+                  <a
+                    href={`mailto:${m.email}`}
+                    onClick={e => e.stopPropagation()}
+                    className="font-body text-xs text-muted-foreground hover:text-primary transition-colors"
+                  >
                     {m.email}
                   </a>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
-                  <span className="font-mono text-[10px] text-muted-foreground/70">{timeAgo(m.createdAt)}</span>
+                  <span className="font-mono text-[10px] text-muted-foreground/70">{timeAgo(m.created_at)}</span>
                   <button
-                    onClick={e => { e.stopPropagation(); if (confirm('Delete this message?')) dispatch({ type: 'REMOVE_MESSAGE', payload: m.id }); }}
+                    onClick={e => { e.stopPropagation(); deleteMessage(m.id); }}
                     className="text-destructive/60 hover:text-destructive transition-colors"
                     aria-label="Delete message"
                   >
@@ -70,7 +148,9 @@ export default function MessagesPanel() {
                   </button>
                 </div>
               </div>
-              <p className="font-body text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">{m.message}</p>
+              <p className="font-body text-sm text-foreground/80 leading-relaxed whitespace-pre-wrap">
+                {m.message}
+              </p>
             </article>
           ))}
         </div>

@@ -1,29 +1,49 @@
 import { useRef, useState } from 'react';
 import { motion, useInView } from 'framer-motion';
 import { useApp } from '@/contexts/AppContext';
+import { supabase } from '@/lib/supabase';
 import character2 from '@/assets/character-2.png';
 
 export default function ContactSection() {
-  const { state, dispatch } = useApp();
+  const { state } = useApp();
   const ref = useRef<HTMLElement>(null);
   const isInView = useInView(ref, { once: true, margin: '-80px' });
   const [form, setForm] = useState({ name: '', email: '', message: '' });
   const [sent, setSent] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+
     const name = form.name.trim();
     const email = form.email.trim();
     const message = form.message.trim();
+
     if (!name || name.length > 100) return setError('Please enter a valid name (max 100 chars).');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 255) return setError('Please enter a valid email.');
     if (!message || message.length > 1000) return setError('Message must be 1–1000 characters.');
-    dispatch({
-      type: 'ADD_MESSAGE',
-      payload: { id: Date.now().toString(), name, email, message, createdAt: Date.now(), read: false },
+
+    setLoading(true);
+
+    const { error: dbError } = await supabase.from('messages').insert({
+      id: Date.now().toString(),
+      name,
+      email,
+      message,
+      created_at: Date.now(),
+      read: false,
     });
+
+    setLoading(false);
+
+    if (dbError) {
+      console.error('[Contact] Supabase insert failed:', dbError.message);
+      setError('Something went wrong. Please try again.');
+      return;
+    }
+
     setForm({ name: '', email: '', message: '' });
     setSent(true);
     setTimeout(() => setSent(false), 4000);
@@ -107,9 +127,10 @@ export default function ContactSection() {
               {sent && <p className="font-body text-xs text-primary">Message received — thanks for reaching out!</p>}
               <button
                 type="submit"
-                className="px-8 py-3.5 rounded-xl bg-primary text-primary-foreground font-display text-sm font-semibold tracking-wide hover:brightness-110 transition-all duration-300 shadow-[0_4px_20px_hsl(var(--primary)/0.15)]"
+                disabled={loading}
+                className="px-8 py-3.5 rounded-xl bg-primary text-primary-foreground font-display text-sm font-semibold tracking-wide hover:brightness-110 transition-all duration-300 shadow-[0_4px_20px_hsl(var(--primary)/0.15)] disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                Send Message →
+                {loading ? 'Sending…' : 'Send Message →'}
               </button>
             </form>
           </motion.div>
